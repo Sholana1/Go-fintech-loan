@@ -1,0 +1,127 @@
+# Alert rules for the personal-loan product. Thresholds are starting points
+# to be tuned against production behaviour; each alert names its runbook.
+groups:
+  - name: ledger-correctness
+    rules:
+      - alert: LedgerInvariantViolated
+        expr: max by (kind) (ledger_invariant_violations) > 0
+        for: 0m
+        labels: {severity: page, owner: core-banking}
+        annotations:
+          summary: "Ledger invariant {{ $labels.kind }} is violated"
+          runbook: docs/runbooks/ledger-discrepancy.md
+      - alert: LedgerLockContention
+        expr: sum(rate(ledger_tx_retries_total[5m])) > 1
+        for: 10m
+        labels: {severity: ticket, owner: core-banking}
+        annotations:
+          summary: "Ledger transactions are being retried for deadlocks or serialization failures"
+          runbook: docs/adr/0010-hot-accounts-deferred.md
+      - alert: LedgerOutboxNotDraining
+        expr: ledger_outbox_oldest_unpublished_seconds > 60
+        for: 5m
+        labels: {severity: ticket, owner: core-banking}
+        annotations:
+          summary: "Ledger events are not reaching Kafka; money movement is unaffected, consumers are stale"
+
+  - name: loans
+    rules:
+      - alert: LoanDisbursementPendingTooLong
+        expr: loan_disbursement_oldest_pending_seconds > 60
+        for: 2m
+        labels: {severity: page, owner: lending}
+        annotations:
+          summary: "A customer accepted a loan more than a minute ago and it has not been disbursed"
+          runbook: docs/runbooks/failed-or-stuck-disbursement.md
+      - alert: LoanPostingIntentPendingTooLong
+        expr: loan_posting_intent_oldest_pending_seconds > 300
+        for: 5m
+        labels: {severity: page, owner: lending}
+        annotations:
+          summary: "A ledger posting for a loan has been pending for over five minutes"
+          runbook: docs/runbooks/repayment-discrepancy.md
+      - alert: LoanPayoutUnresolved
+        expr: loan_payout_oldest_unresolved_seconds > 1800
+        for: 0m
+        labels: {severity: page, owner: lending}
+        annotations:
+          summary: "An external payout has had an unknown outcome for over 30 minutes; funds remain held"
+          runbook: docs/runbooks/uncertain-payout.md
+      - alert: LoanReconciliationExceptionOpen
+        expr: sum by (kind) (loan_recon_exceptions_open) > 0
+        for: 15m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "Reconciliation exception {{ $labels.kind }} is open"
+          runbook: docs/runbooks/README.md
+      - alert: LoanControlAccountMismatch
+        expr: loan_recon_exceptions_open{kind=~"CONTROL_ACCOUNT_MISMATCH|JOURNAL_MISMATCH"} > 0
+        for: 0m
+        labels: {severity: page, owner: core-banking}
+        annotations:
+          summary: "The loan book and the ledger disagree"
+          runbook: docs/runbooks/ledger-discrepancy.md
+      - alert: LoanSystemTimeSLO
+        # Five-minute target, measured as system time: p95 <= 120 s.
+        expr: histogram_quantile(0.95, sum by (le) (rate(loan_system_time_seconds_bucket[30m]))) > 120
+        for: 15m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "p95 loan system time (decision + disbursement) exceeds the 120 s objective"
+      - alert: LoanDecisionSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(loan_decision_seconds_bucket{outcome="APPROVE"}[30m]))) > 90
+        for: 15m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "p95 loan decision time exceeds the 90 s objective; check the bureau stage"
+      - alert: LoanBureauFailing
+        expr: sum(rate(loan_assessment_stage_seconds_count{stage="bureau",result="error"}[10m])) / sum(rate(loan_assessment_stage_seconds_count{stage="bureau"}[10m])) > 0.2
+        for: 10m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "More than 20% of credit-bureau calls are failing; applications are waiting, not being decided"
+      - alert: LoanOutboxNotDraining
+        expr: loan_outbox_oldest_unpublished_seconds > 60
+        for: 5m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "Lending events are not reaching Kafka"
+      - alert: LoanConsumerStale
+        expr: histogram_quantile(0.95, sum by (le) (rate(loan_event_age_seconds_bucket[10m]))) > 60
+        for: 10m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "Lending is consuming ledger events more than a minute late"
+      - alert: LoanCallbacksRejected
+        expr: sum(rate(loan_payout_callbacks_total{outcome="rejected"}[10m])) > 0
+        for: 10m
+        labels: {severity: ticket, owner: security}
+        annotations:
+          summary: "Provider callbacks are failing authentication"
+          runbook: docs/runbooks/payout-callbacks.md
+      - alert: LoanExternalPaymentNotCredited
+        expr: loan_external_payment_oldest_confirmed_wait_seconds > 300
+        for: 5m
+        labels: {severity: page, owner: lending}
+        annotations:
+          summary: "A customer payment confirmed by the provider has not been credited and applied for over 5 minutes"
+          runbook: docs/runbooks/external-payment.md
+      - alert: LoanPaymentVerificationFailing
+        expr: sum(rate(loan_provider_call_seconds_count{operation="verify_payment",outcome="error"}[10m])) / sum(rate(loan_provider_call_seconds_count{operation="verify_payment"}[10m])) > 0.2
+        for: 10m
+        labels: {severity: ticket, owner: lending}
+        annotations:
+          summary: "More than 20% of payment verification calls get no usable answer; customer payments are not being credited"
+          runbook: docs/runbooks/external-payment.md
+      - alert: RateLimiterUnavailable
+        expr: sum by (limit) (rate(ratelimit_decisions_total{outcome="unavailable"}[5m])) > 0
+        for: 5m
+        labels: {severity: ticket, owner: platform}
+        annotations:
+          summary: "The rate limiter cannot reach Redis and is letting every request through (fail open)"
+      - alert: LoanManualReviewBacklog
+        expr: loan_applications_in_manual_review > 50
+        for: 30m
+        labels: {severity: ticket, owner: credit-operations}
+        annotations:
+          summary: "More than 50 applications are waiting for manual review"

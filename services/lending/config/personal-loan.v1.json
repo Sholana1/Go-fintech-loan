@@ -1,0 +1,34 @@
+{
+  "id": "personal-loan",
+  "version": 1,
+  "currency": "NGN",
+  "min_principal_minor": 1000000,
+  "max_principal_minor": 50000000,
+  "principal_step_minor": 100000,
+  "tenors_months": [1, 3, 6],
+  "min_kyc_tier": 2,
+  "min_age": 18,
+  "rate_bands": [
+    {"band": "A", "monthly_rate_bps": 400},
+    {"band": "B", "monthly_rate_bps": 600},
+    {"band": "C", "monthly_rate_bps": 800}
+  ],
+  "origination_fee_bps": 100,
+  "late_fee_minor": 50000,
+  "late_fee_grace_days": 3,
+  "offer_validity_hours": 24,
+  "application_validity_hours": 24,
+  "arrears_buckets": [
+    {"name": "CURRENT", "min_days_past_due": 0},
+    {"name": "DPD_1_30", "min_days_past_due": 1},
+    {"name": "DPD_31_60", "min_days_past_due": 31},
+    {"name": "DPD_61_90", "min_days_past_due": 61},
+    {"name": "DPD_OVER_90", "min_days_past_due": 91}
+  ],
+  "write_off_min_days_past_due": 91,
+  "restructure_max_tenor_months": 12,
+  "allow_partial_collection": true,
+  "collection_attempts_per_day": 3,
+  "collection_retry_after_hours": 4,
+  "disclosure_version": "PL-TERMS-1"
+}

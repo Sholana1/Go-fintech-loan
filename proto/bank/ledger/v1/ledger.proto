@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package bank.ledger.v1;
+
+import "bank/common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "bankplatform.internal/gen/bank/ledger/v1;ledgerv1";
+
+// LedgerService is the only writer of financial balances.
+//
+// Conventions that apply to every RPC:
+//   - Authorization: the caller is identified by its mTLS workload identity.
+//     Each (caller, action) pair must be present in ledger.posting_rights.
+//     Missing right -> PERMISSION_DENIED.
+//   - Deadline: callers must set one; the server refuses to run longer than
+//     its own statement and lock timeouts regardless.
+//   - Idempotency: every mutating RPC carries a durable reference. Repeating
+//     a call with the same reference and the same content returns the first
+//     result. The same reference with different content is rejected with
+//     FAILED_PRECONDITION / reason POSTING_REF_REUSED. Retrying is therefore
+//     always safe.
+//   - Retry policy: retry only UNAVAILABLE, ABORTED and DEADLINE_EXCEEDED,
+//     with the same reference. Never retry with a new reference.
+//   - Errors carry google.rpc.ErrorInfo with a stable `reason`
+//     (see docs/contracts/ledger-errors.md).
+//   - Compatibility: fields are only added; removed fields are reserved.
+service LedgerService {
+  // OpenAccount creates a customer account of a server-defined kind.
+  // Idempotent on `code`.
+  rpc OpenAccount(OpenAccountRequest) returns (OpenAccountResponse);
+
+  // PostJournal atomically checks funds and posts a balanced journal.
+  // Idempotent on `ref`.
+  rpc PostJournal(PostJournalRequest) returns (PostJournalResponse);
+
+  // PlaceHold reserves available funds without an accounting entry.
+  // Idempotent on `ref`.
+  rpc PlaceHold(PlaceHoldRequest) returns (PlaceHoldResponse);
+
+  // CaptureHold closes a hold and posts the journal that consumes it, in one
+  // transaction. Any uncaptured remainder is released. Idempotent on `ref`.
+  rpc CaptureHold(CaptureHoldRequest) returns (CaptureHoldResponse);
+
+  // ReleaseHold closes a hold without posting. Idempotent. Fails with
+  // FAILED_PRECONDITION / HOLD_ALREADY_CAPTURED if the hold was captured.
+  rpc ReleaseHold(ReleaseHoldRequest) returns (ReleaseHoldResponse);
+
+  // GetBalance returns the authoritative balance. For display and
+  // reconciliation only: a balance read never authorizes spending.
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+
+  // GetJournal looks a journal up by its posting reference.
+  rpc GetJournal(GetJournalRequest) returns (GetJournalResponse);
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_DEBIT = 1;
+  DIRECTION_CREDIT = 2;
+}
+
+enum AccountKind {
+  ACCOUNT_KIND_UNSPECIFIED = 0;
+  // Customer deposit: bank liability, credit-normal, available may not go
+  // below zero.
+  ACCOUNT_KIND_CUSTOMER_DEPOSIT = 1;
+}
+
+enum HoldStatus {
+  HOLD_STATUS_UNSPECIFIED = 0;
+  HOLD_STATUS_ACTIVE = 1;
+  HOLD_STATUS_CAPTURED = 2;
+  HOLD_STATUS_RELEASED = 3;
+  HOLD_STATUS_EXPIRED = 4;
+}
+
+// PostingRef links a journal to the business operation step that caused it
+// and is the idempotency key for posting. One journal per reference, ever.
+message PostingRef {
+  string op_type = 1;
+  // UUID of the business operation.
+  string op_id = 2;
+  string op_step = 3;
+}
+
+// HoldRef identifies a hold by the business operation that placed it.
+message HoldRef {
+  string op_type = 1;
+  string op_id = 2;
+}
+
+message Line {
+  string account_code = 1;
+  Direction direction = 2;
+  // Strictly positive.
+  bank.common.v1.Money amount = 3;
+}
+
+message OpenAccountRequest {
+  string code = 1;
+  AccountKind kind = 2;
+  string currency = 3;
+  // UUID of the owning customer.
+  string owner_id = 4;
+}
+
+message OpenAccountResponse {
+  string code = 1;
+  bool already_existed = 2;
+}
+
+message PostJournalRequest {
+  PostingRef ref = 1;
+  string journal_type = 2;
+  repeated Line lines = 3;
+  // Optional ISO date (YYYY-MM-DD) in Africa/Lagos. Defaults to the posting
+  // date. Must not be in the future.
+  string business_date = 4;
+  string narrative = 5;
+}
+
+message PostJournalResponse {
+  int64 journal_id = 1;
+  google.protobuf.Timestamp posted_at = 2;
+  string business_date = 3;
+  // True when this reference had already been posted; the original journal
+  // is returned and nothing new was written.
+  bool already_posted = 4;
+}
+
+message PlaceHoldRequest {
+  HoldRef ref = 1;
+  string account_code = 2;
+  bank.common.v1.Money amount = 3;
+  // Optional. Holds for external payments with unknown outcomes have none.
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message PlaceHoldResponse {
+  string hold_id = 1;
+  HoldStatus status = 2;
+  bool already_placed = 3;
+}
+
+message CaptureHoldRequest {
+  HoldRef hold = 1;
+  PostingRef ref = 2;
+  string journal_type = 3;
+  // Must contain debits to the held account totalling no more than the hold.
+  repeated Line lines = 4;
+  string narrative = 5;
+}
+
+message CaptureHoldResponse {
+  int64 journal_id = 1;
+  google.protobuf.Timestamp posted_at = 2;
+  bool already_captured = 3;
+}
+
+message ReleaseHoldRequest {
+  HoldRef hold = 1;
+}
+
+message ReleaseHoldResponse {
+  HoldStatus status = 1;
+  bool already_closed = 2;
+}
+
+message GetBalanceRequest {
+  string account_code = 1;
+}
+
+message GetBalanceResponse {
+  bank.common.v1.Money posted = 1;
+  bank.common.v1.Money held = 2;
+  // posted - held for accounts with a floor; equal to posted otherwise.
+  bank.common.v1.Money available = 3;
+  int64 version = 4;
+}
+
+message GetJournalRequest {
+  PostingRef ref = 1;
+}
+
+message GetJournalResponse {
+  int64 journal_id = 1;
+  string journal_type = 2;
+  google.protobuf.Timestamp posted_at = 3;
+  string business_date = 4;
+  repeated Line lines = 5;
+  string created_by = 6;
+}

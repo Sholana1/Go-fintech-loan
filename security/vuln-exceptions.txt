@@ -1,0 +1,5 @@
+# Reachable vulnerabilities that are knowingly accepted for a limited time.
+# Format: <id> <expires YYYY-MM-DD> <reason>
+# `make vuln` fails on any reachable vulnerability not listed here, and on any
+# entry past its expiry date. Each entry needs a reason a reviewer can check.
+GO-2026-6443 2026-11-15 google.golang.org/grpc v1.84.0: server panic on a request with no :authority/Host header. No tagged release contains the fix yet (only v1.85.0-dev pseudo-versions). Exposure: every gRPC listener requires a verified client certificate (platform/grpcx refuses to start otherwise), so only authenticated platform workloads can reach the HTTP/2 layer. Action: upgrade to v1.85.0 when it is tagged.

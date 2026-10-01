@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package bank.common.v1;
+
+option go_package = "bankplatform.internal/gen/bank/common/v1;commonv1";
+
+// Money is an exact amount in the minor unit of a currency (kobo for NGN).
+// Floating point is never used for money anywhere in the platform.
+message Money {
+  // Amount in minor units. Sign conventions are defined by the field that
+  // carries the Money; ledger lines always carry strictly positive amounts.
+  int64 minor_units = 1;
+  // ISO 4217 alphabetic code, upper case.
+  string currency = 2;
+}

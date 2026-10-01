@@ -1,0 +1,14 @@
+{
+  "version": "credit-policy-v1",
+  "min_bureau_score": 500,
+  "score_bands": [
+    {"min_score": 700, "band": "A"},
+    {"min_score": 600, "band": "B"},
+    {"min_score": 500, "band": "C"}
+  ],
+  "max_delinquency_days_12m": 60,
+  "max_debt_service_bps": 4000,
+  "max_total_exposure_minor": 50000000,
+  "auto_approve_max_principal_minor": 30000000,
+  "max_applications_24h": 3
+}

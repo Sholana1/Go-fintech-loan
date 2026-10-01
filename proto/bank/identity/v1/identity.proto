@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package bank.identity.v1;
+
+option go_package = "bankplatform.internal/gen/bank/identity/v1;identityv1";
+
+// IdentityService is the internal (service-to-service) surface of identity.
+// Customer-facing registration and login are REST endpoints on identityd.
+//
+// Conventions:
+//   - Authorization: mTLS workload identity; each RPC lists allowed callers
+//     in identity configuration. Otherwise PERMISSION_DENIED.
+//   - All RPCs are read-only or verification-only and are safe to retry on
+//     UNAVAILABLE and DEADLINE_EXCEEDED. VerifyCustomerPin counts failed
+//     attempts, so a retry after an ambiguous failure may consume an attempt;
+//     callers should surface the error instead of retrying it.
+//   - Compatibility: fields are only added; removed fields are reserved.
+service IdentityService {
+  // GetCustomer returns the KYC view of a customer. It never returns the BVN.
+  rpc GetCustomer(GetCustomerRequest) returns (GetCustomerResponse);
+
+  // VerifyCustomerPin is the step-up check for money-moving actions.
+  rpc VerifyCustomerPin(VerifyCustomerPinRequest) returns (VerifyCustomerPinResponse);
+
+  // GetCreditBureauSubject returns the identifiers a credit bureau needs.
+  // Allowed only for the lending service, and only with a consent reference
+  // recorded by the caller. Every call is written to the identity audit log.
+  rpc GetCreditBureauSubject(GetCreditBureauSubjectRequest) returns (GetCreditBureauSubjectResponse);
+
+  // ResolveRecipient finds a customer who can receive a transfer, by phone
+  // number, so that a sender can confirm who they are about to pay. Allowed
+  // only for the payments service. A customer who is blocked, not verified
+  // or has no account yet is reported as NOT_FOUND, exactly like a number
+  // that is not registered.
+  rpc ResolveRecipient(ResolveRecipientRequest) returns (ResolveRecipientResponse);
+}
+
+enum KycStatus {
+  KYC_STATUS_UNSPECIFIED = 0;
+  KYC_STATUS_PENDING = 1;
+  KYC_STATUS_VERIFIED = 2;
+  KYC_STATUS_REJECTED = 3;
+}
+
+enum CustomerStatus {
+  CUSTOMER_STATUS_UNSPECIFIED = 0;
+  CUSTOMER_STATUS_ACTIVE = 1;
+  CUSTOMER_STATUS_BLOCKED = 2;
+}
+
+message GetCustomerRequest {
+  string customer_id = 1;
+}
+
+message GetCustomerResponse {
+  string customer_id = 1;
+  CustomerStatus status = 2;
+  KycStatus kyc_status = 3;
+  int32 kyc_tier = 4;
+  string full_name = 5;
+  // ISO date YYYY-MM-DD.
+  string date_of_birth = 6;
+  // Ledger code of the customer's main deposit account.
+  string deposit_account_code = 7;
+}
+
+message VerifyCustomerPinRequest {
+  string customer_id = 1;
+  string pin = 2;
+}
+
+message VerifyCustomerPinResponse {
+  bool verified = 1;
+  // True when the credential is temporarily locked after repeated failures.
+  bool locked = 2;
+}
+
+message GetCreditBureauSubjectRequest {
+  string customer_id = 1;
+  // Reference to the consent record held by the caller.
+  string consent_ref = 2;
+}
+
+message GetCreditBureauSubjectResponse {
+  string bvn = 1;
+  string full_name = 2;
+  string date_of_birth = 3;
+}
+
+message ResolveRecipientRequest {
+  // Nigerian mobile number in +234 format.
+  string phone = 1;
+}
+
+message ResolveRecipientResponse {
+  string customer_id = 1;
+  // The recipient's name as registered, shown to the sender for confirmation.
+  string display_name = 2;
+  string deposit_account_code = 3;
+}
